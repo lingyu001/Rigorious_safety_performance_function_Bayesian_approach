@@ -1,0 +1,234 @@
+---
+title: "Safety Performance Function of Pennsylvania Centre County in Bayesian Framework"
+author: "Lingyu Li"
+date: "May 1, 2016"
+output: pdf_document
+---
+
+
+1. Background
+
+Safety performance function (SPF) is one of the most important tools in transportation safety study. It is widely used as a statistical method to evaluate the impact of traffic accident influential factors and predict the expected average crash frequency within a roadway segment associated with a particular geometric design, given time period, and specific traffic volume. In the Highway Safety Manual, published by American Association of State Highway and Transportation Officials, the SPFs are specified as negative binomial regression models considering the count outcome variable as total crash frequency (crash number per year), fatal crash frequency, or fatal and injury crash frequency. For the predictors, the length of the roadway segment is usually considered as an offset variable in the model since crash count and length of the road segment is usually considered to have a direct ratio. So the likelihood of a crash is not changing over the roadway length. Traffic volume is another important predictor since it directly indicates the exposure of vehicles on the road. Annual Average Daily Traffic (AADT) is a general measure of traffic volume. In addition, there are other factors affecting safety such as roadside hazard rate, shoulder rumble strips, the presence of passing zone, number of driver ways to the main roadway, horizontal curve density, degree of curvature per mile, etc.  The predicted crash frequency of SPFs could be used as a strong reference to improve the transportation facilities, address some serious safety issues on highways or urban streets. It could also be used to evaluate the safety effectiveness of a countermeasure by processing a before and after study. 
+
+The SPF is usually estimated in the traditional(frequentist) framework using max likelihood estimation (MLE). However, compared with Bayesian estimation, there is some deficiency in the frequentist framework. First, the frequentist framework makes inference about the parameters according to the p-value. The p-value is equal to the probability that the test statistic exceeds the observed value given the null-hypothesis, which represented the extremeness of the observed result under the null-hypothesis.  In this framework, there is no inference about the probability of that the null-hypothesis is true and about the alternative. Comparably, in the Bayesian framework, it is accessible to compare the evidence from the dataset and two hypotheses. In addition, the Bayes factor indicates the power of null-hypothesis versus the alternative. It quantifies the power of statistical inference. Besides, Bayesian methods are also advanced in computing methods. Bayesian models have the advantage of being able to handle very complex models, especially for some models that do not have easily calculable likelihood functions. The Markov Chain Monte Carlo (MCMC) sampling estimation methods makes it easier to handle complex function forms. For example, in transportation data analysis, random parameter models are used to capture the unobserved heterogeneity since it allows parameters to vary across observations (such as roadway segments). Random parameter models are more easily estimated using MCMC method. Thus, it is meaningful to apply Bayesian method on the estimation of safety performance function.
+In this study, a Pennsylvania centre county two-lane rural highway safety performance function is estimated in Bayesian framework. The dataset used to estimate the model is provided by Pennsylvania Department of Transportation, which include the crash record, traffic information and geometric design features.
+
+2. Data Description
+
+The dataset used in the estimation is complied base on the Pennsylvania center county two-lane rural highway inventory and reported crash inventory from 2005 to 2012. Each crash record in the crash inventory were made by police officers who were assigned to investigate the transportation accidents. The roadway inventory and other traffic and geometric design information were provided by PennDOT. In the data frame, each row is one road segment of one year. There are 477 two-lane rural highway segments in centre county (8 years data, 3816 rows). The crash count is the number of crash occured in a year within the segment. The detailed information of the data is presented as following:
+
+```{r}
+crash<-read.csv("centre_tlrh.csv")
+attach(crash)
+
+#Data Description
+
+library(pastecs)
+#responsible varialbe, total crash count of one year one segment
+
+#from the histogram, the distribution of total crash follows poision distribution
+#Most of the crash count is zero since the daily traffic volume in rural area is very low
+#Since the variance (0.8168) is larger than the mean (0.5561), we should use negative binomial distribution to count for overdispersion
+stat.desc(total_crash)
+hist(total_crash)
+
+#AADT is the Annual Average Daily Traffic, unit is vehicle/day
+stat.desc(aadt_yr)
+#length of the road segment, unit is mile
+stat.desc(length_mi_yr)
+#roadside hazard rate, there are 7 levels, 1 is the lowest hazard rate and 7 is the highest
+#rhr_4 indicator: If the roadside hazard rate is 4 (1) or others (0)
+stat.desc(rhr_4)
+#rhr567 indicator: If the roadside hazard rate is 5 or 6 or 7 (1), or others(0)
+stat.desc(rhr567)
+#pass_zone indicator: If there is a passing lane in this segment (1) or not(0)
+stat.desc(pass_zone)
+#accessdensity (countinuous): driverway density in the segment (# of driverways/mile)
+stat.desc(accessdensity)
+#curve_density (countinuous): horizontal curves density per mile in the segment (# of horizontal curve/mile)
+stat.desc(curve_density)
+#d_seg_mi (countinuous): degree of curvature per mile in the segment (degress/100ft/mile), represented the average sharpness of horizontal curve in the segments
+stat.desc(d_seg_mi)
+
+```
+
+
+3. SPF in Frequentist Framework
+
+The presentation of SPF in frequentist framework here is to show the general safety performance function and compare to the estimation in Bayesian framework. The predictors in the model is recommended by the District 2 two-lane rural highway segment SPF according to "Regionalized Safety Performance Functions". In the frequentist framework, the variable rhr_4, rhr567, and curve_density are not statistically significant in the model, which means the probability of observed statistic value exceed test statistic is not high enough, so it fails to reject the null-hyphothesis that these varialbes have no association with the rate.
+
+```{r}
+library(MASS)
+#negative binomial regression for total crash frequency
+model1=glm.nb(total_crash~lnaadt+offset(lnlength)+rhr_4+rhr567+pass_zone+accessdensity+curve_density+d_seg_mi)
+summary(model1)
+```
+
+
+
+4. SPF in Bayesian Framework
+
+For Bayesian estimation, firstly, it is necessary to set a prior distribution of the parameters. The prior distribution is set according to the prior knowledge of this problem. According to the property of each parameters, and the prior knowledge from the Distric 2 SPF from "Regionalized Safety Performance Function", the prior of each parameters in negative binomial regression are set. The detailed explanation is presented in the following code. With regard to the selection of predictors,they are the same group of predictors recommended in the SPF report. In order to compare the effects of the predictors, except AADT and Length, which is the exposure and offset variable, all the other varible are input as the standalized form. Then the effect of these geometric design factors can be directly compared (across categorical variables or continuous variables).The data input, model specification, prior setting and MCMC estimation setting is presented as following.
+
+```{r}
+#graphics.off() # This closes all of R's graphics windows.
+#rm(list=ls())  # Careful! This clears all of R's memory!
+
+library(rjags)
+#input the data from crash dataset
+data = list(
+  y = total_crash,
+#exposure and offset varialbes
+  lnaadt = lnaadt,
+  lnlength=lnlength,
+# standalize the varabiles to compare the effect of each predictor directly from the magnitude of coefficient
+  rhr_4=(rhr_4-mean(rhr_4))/sd(rhr_4),
+  rhr567=(rhr567-mean(rhr567))/sd(rhr567),
+  pass_zone=(pass_zone-mean(pass_zone))/sd(pass_zone),
+  accessdensity=(accessdensity-mean(accessdensity))/sd(accessdensity),
+  curve_density=(curve_density-mean(curve_density))/sd(curve_density),
+  d_seg_mi=(d_seg_mi-mean(d_seg_mi))/sd(d_seg_mi),
+
+
+#   rhr_4 = rhr_4,
+#   rhr567=rhr567,
+#   pass_zone=pass_zone,
+#   accessdensity=accessdensity,
+#   curve_density=curve_density,
+#   d_seg_mi=d_seg_mi,
+  n = length(total_crash)
+)
+#jags model specification
+modelString = "
+
+model{
+
+##model specification
+for(i in 1:n){
+
+#observed counts
+  y[i] ~ dnegbin(p[i],r)
+
+#function form
+  mu[i]<- lnlength[i] + alpha*lnaadt[i] + beta0 + beta1*rhr_4[i] + beta2*rhr567[i] + beta3*pass_zone[i] +   beta4*accessdensity[i] + beta5*curve_density[i] + beta6*d_seg_mi[i]
+# mu[i]<- lnlength[i] + alpha*lnaadt[i] + beta0
+
+  lambda[i]<-exp(mu[i]) 
+  p[i]<-r/(r+lambda[i])
+  
+  }
+
+##prior setting
+##r is set to follow a catogerical distribution
+r ~ dcat(pi[])
+for(i in 1:100){pi[i]<-1/100}
+##alternative: uniform distribution
+# r ~ dunif(0,50)
+
+##coefficient of the explanatory variables
+#prior of alpha on lnaadt
+alpha ~ dnorm(1,1/0.1^2)
+
+#prior of beta0, intercept
+beta0 ~ dnorm(-5,1/1^2)
+
+#prior of coefficients of other geometric design predictors
+beta1 ~ dnorm(0,1/0.5^2)
+beta2 ~ dnorm(0,1/0.5^2)
+beta3 ~ dnorm(0,1/0.5^2)
+beta4 ~ dnorm(0,1/0.5^2)
+beta5 ~ dnorm(0,1/0.5^2)
+beta6 ~ dnorm(0,1/0.5^2)
+
+#examine the posterior
+lambda_mean<-mean(lambda)
+p_mean <- mean(p)
+
+#examine the likelihood of data
+y_mean <- mean(y)
+
+}
+"
+writeLines( modelString , con="NBmodel.txt" )
+#-----------------------------------------------------------------------------
+# The parameters to be monitored
+parameters = c( "p" , "r" , "lambda","mu","lambda_mean","p_mean","y_mean", "alpha" , "beta0", "beta1","beta2","beta3","beta4","beta5","beta6" )    
+# parameters = c( "p" , "r" , "lambda","mu","lambda_mean","p_mean","y_mean", "alpha" , "beta0" ) 
+adaptSteps = 500            # Number of steps to adapt the samplers 500
+burnInSteps = 1000            # Number of steps to burn-in the chains 1000
+nChains = 3                  # nChains should be 2 or more for diagnostics 3 
+numSavedSteps=10000           #10000 
+thinSteps=1
+nIter = ceiling( ( numSavedSteps * thinSteps ) / nChains )
+# make JAGS model object and adapt samplers
+jagsModel = jags.model( "NBmodel.txt" , data=data ,
+                         n.chains=nChains , n.adapt=adaptSteps )
+
+update( jagsModel , n.iter=burnInSteps )
+
+codaSamples = coda.samples(jagsModel,variable.names=parameters,thin=thinSteps,n.iter=nIter)
+
+# # #  Plotting starts here # # # 
+library(coda)
+prettyColors = c("darkolivegreen3", "deeppink3", "darkolivegreen4","gold2", "olivedrab3")
+
+par( mar=0.5+c(3,4,1,0),oma=0.1+c(0,0,2,0),mgp=c(2.25,0.7,0), cex.lab=1.5 )
+layout(matrix(1:2,nrow=1))
+
+traceplot( codaSamples[,"lambda_mean"] , main="" , xlab = "Samples", ylab="total crash" ,
+                 col=prettyColors ) 
+
+chains = length(codaSamples)
+xax = NULL
+yax = NULL
+# Here we add a loop chains 
+for ( cc in 1:chains ) {
+  calcdens = density(codaSamples[,"lambda_mean"][[cc]]) 
+  xax = cbind(xax,calcdens$x)
+  yax = cbind(yax,calcdens$y)
+}
+matplot( xax , yax , type="l" , col=prettyColors , 
+         main="" , xlab="total crash" , ylab="Probability Density" )
+
+# # #  Posterior summarizer starts here # # # 
+
+source("posteriorSummaryStats.R")
+resulttable <- summarizePost(codaSamples)
+saveNonConverged <- resulttable[resulttable$RHAT>1.1,]
+if (nrow(saveNonConverged) == 0){
+  print("Convergence criterion was met for every parameter.")
+}else{ 
+  print("Not converged parameter(s):")
+  show(saveNonConverged)
+}
+
+saveLowESS <- resulttable[resulttable$ESS<500,]
+if (nrow(saveLowESS) == 0){
+  print("ESS is higher than 500 for every parameter.")
+}else{ 
+  print("Parameters with low ESS:")
+  show(saveNonConverged)
+}
+
+show(summarizePost(codaSamples, filters = c( "r" , "lambda_mean","p_mean","y_mean", "alpha" , "beta0", "beta1","beta2","beta3","beta4","beta5","beta6" )) )
+# show(summarizePost(codaSamples, filters = c( "r" , "lambda_mean","p_mean","y_mean", "alpha" , "beta0" )) )
+```
+
+he estimation result shows that the convergence criterion was met for every parameter. With respect to the effective sample size of MCMC sampling, alpha and beta0 is quite low effective sample size. Effective sample size measures the amount of independent information (sample size of a completely non-autocorrelated chain). But all the other parameters has a comparably high effective sample size, which indicates a good accuracy.
+With regard to the posterior distribution of each parameter:
+alpha is the coefficient of lnaadt, the mean of alpha is quite close to the alpha in traditional estimation.
+beta0 is the intercept, the exp(beta0) represent the baseline of crash frequency prediction.It's close to the estimate from frequentist framework.
+beta1 to beta6 is the posterior distribution of the coefficient of all geometric design factors. The positive coefficient indicates that if the value of the variable increase, there will be more crashes and vice versa. For the dummy variables, beta3 is the only negative coefficient and has the highest absolute value, which means the presence of passing lane affect the most compared with roadside hazard rate 4 and roadside hazard rate 5 or 6 or 7. It reduces total crash frequency. The most interesting finding is that coefficient of rhr567 (beta2) is quite different from the estimates in frequentist framework. In the frequentist framework, rhr567 is not statistically significant due to lack of variation in the dataset. The coefficient distribution of rhr567 in Bayesian estimation should be more convictive since it converges the prior distribution and observed data likelihood of this parameter. For continuous variables, beta6 is the highest, so degree of curvature per mile has the largest impact. If the horizontal in the road segment is sharper, there will be more crashes.
+The lambda_mean is the posterior distribution of crash count mean, which is close to the mean of the observed data. It somehow indicates a favorable the model prediction is close to the reality.
+
+5. Conclusion
+
+In summary, the project uses Bayesian method to estimate a negative binomial model to predict the crash frequency in each two-lane rural highway segments in center county Pennsylvania. Roadway length, traffic volume, and geometric design features are considered as the influential factors in the model. According to the MCMC sampling result, the convergence criteria were met for each parameter. The posterior distribution of each parameter is presented. Compared with the estimation in the frequentist framework, most of the coefficient means in Bayesian estimation are close to that in frequentist framework. The difference estimates of rhr567 indicate that Bayesian estimation is more convictive if there is not much variation of an indicator in the dataset. 
+
+
+6.Reference
+
+1) Gigerenzer, Gerd. "Mindless statistics." The Journal of Socio-Economics 33.5 (2004): 587-606.
+2) Mannering, F. L., & Bhat, C. R. (2014). Analytic methods in accident research: Methodological frontier and          future   directions. Analytic Methods in Accident Research, 1, 1-22. http://doi.org/10.1016/j.amar.2013.09.001
+3) Lord, D., & Mannering, F. (2010). The statistical analysis of crash-frequency data: A review and assessment of      methodological alternatives. Transportation Research Part A: Policy and Practice, 44(5), 291-305. 
+4) Donnell, Eric, Vikash Gayah, and Lingyu Li. Regionalized Safety Performance Functions. No. FHWA-PA-2016-001-PSU WO 017. 2016.
